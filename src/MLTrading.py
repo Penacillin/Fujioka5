@@ -178,16 +178,22 @@ def run_trainer():
     action_in = tf.placeholder("float", [None, ACTION_DIM])
     target_in = tf.placeholder("float", [None])
 
+BATCH_SIZE = 64
+
 def get_soft_predictor_model():
-    model = tf.keras.Sequential([
-        layers.Dense(500, activation='relu'),
-        layers.Dropout(0.5),
-        layers.Dense(200),
-        layers.Dropout(0.5),
-        layers.Dense(40),
-        layers.Dense(20),
-        layers.Dense(3)
-    ])
+    inputs = tf.keras.Input(shape=(BATCH_SIZE,), dtype=tf.float32)
+
+    x = layers.Dense(500, activation='relu', dtype=tf.float32)(inputs)
+    x = layers.Dropout(rate=0.5, dtype=tf.float32)(x)
+    x = layers.Dense(200, activation='relu', dtype=tf.float32)(x)
+    x = layers.Dropout(rate=0.5, dtype=tf.float32)(x)
+    x = layers.Dense(40, activation='relu', dtype=tf.float32)(x)
+    x = layers.Dense(20, activation='relu', dtype=tf.float32)(x)
+    trend_output = layers.Dense(3, activation='relu', dtype=tf.float32)(x)
+    value_output = layers.Dense(1, dtype=tf.float32)(x)
+
+    model = tf.keras.Model(inputs=inputs, outputs=[trend_output, value_output])
+
 
     return model
 
@@ -214,23 +220,29 @@ def main():
     window = 60 # 60 bars
     # Normalize data
     # training data: (samples-window, 3*window)   
+    #  training labels: (samples-window, 3)
     training_data = []
+    training_labels = []
+
     for s in range(len(raw_testing_data)-window):
-        #print(raw_testing_data.iloc[s:s+window].to_numpy().shape)
         training_data.append(raw_testing_data.iloc[s:s+window].to_numpy())
+
+
     training_data = np.array(training_data)
     print(training_data.shape)
+
 
 
     # Training
     model = get_soft_predictor_model()
     model.compile(
         optimizer='adam',
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
+        loss=['sparse_categorical_crossentropy', 'mean_squared_error'],
+        loss_weights=[1.,1.],
+        # metrics=['accuracy']
     )
 
-
+    model.summary()
 
     exit(0)
 
