@@ -40,31 +40,6 @@ def convertHLCBarsToHLCStandadNorm(HLCBarData):
     print(HLCBarData)
     return HLCBarData
 
-
-def plotBarData(barData, filename):
-    """
-    Plots HLC data from barData
-
-    """
-    import plotly
-    import plotly.plotly as py
-    import plotly.graph_objs as go
-
-    open_data = barData[:,2]
-    open_data = np.insert(open_data, 0, 0)
-    high_data = barData[:,0]
-    low_data = barData[:,1]
-    close_data = barData[:,2]
-    dates = [i for i in range(0,len(close_data))]
-
-    trace = go.Ohlc(x=dates,
-                    open=open_data,
-                    high=high_data,
-                    low=low_data,
-                    close=close_data)
-    data = [trace]
-    plotly.offline.plot(data, filename=filename)
-
 def getPDDataDiffed(dateFrom, dataRange, timeFrame, pair):
     '''
     Get data from dateFrom-dataRange to dateFrom with timeframe for pair

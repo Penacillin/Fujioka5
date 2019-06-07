@@ -45,8 +45,9 @@ from tensorflow.keras import layers
 # Keras imports.                                                                #
 #################################################################################
 
-from preprocess import convertHLCBarsToHLCDiffs, plotBarData, getPDDataDiffed, getPDData
+from preprocess import convertHLCBarsToHLCDiffs,  getPDDataDiffed, getPDData
 from scraper import getBarData
+from utilities import plotBarData, plotHistogram
 
 from datetime import datetime, timedelta
 
@@ -179,20 +180,34 @@ def run_trainer():
     target_in = tf.placeholder("float", [None])
 
 BATCH_SIZE = 64
+WINDOW_SIZE = 60
 
 def get_soft_predictor_model():
-    inputs = tf.keras.Input(shape=(BATCH_SIZE,), dtype=tf.float32)
+    inputs = layers.Input(shape=(WINDOW_SIZE,3), batch_size=BATCH_SIZE,
+                            dtype=tf.float32,name='input_layer')
+    x = layers.Flatten()(inputs)
 
-    x = layers.Dense(500, activation='relu', dtype=tf.float32)(inputs)
-    x = layers.Dropout(rate=0.5, dtype=tf.float32)(x)
-    x = layers.Dense(200, activation='relu', dtype=tf.float32)(x)
-    x = layers.Dropout(rate=0.5, dtype=tf.float32)(x)
+    x = layers.Dense(500, activation='relu', dtype=tf.float32,name='500_dense_layer')(x)
+    x = layers.Dropout(rate=0.5, dtype=tf.float32, name='dropout_layer_1')(x)
+    x = layers.Dense(200, activation='relu', dtype=tf.float32, name='200_dense_layer')(x)
+    x = layers.Dropout(rate=0.5, dtype=tf.float32, name='dropout_layer_2')(x)
     x = layers.Dense(40, activation='relu', dtype=tf.float32)(x)
     x = layers.Dense(20, activation='relu', dtype=tf.float32)(x)
-    trend_output = layers.Dense(3, activation='relu', dtype=tf.float32)(x)
-    value_output = layers.Dense(1, dtype=tf.float32)(x)
+    # trend_output = layers.Dense(3, activation='softmax', dtype=tf.float32)(x)
+    value_output = layers.Dense(3, dtype=tf.float32)(x)
 
-    model = tf.keras.Model(inputs=inputs, outputs=[trend_output, value_output])
+    model = tf.keras.Model(inputs=inputs, outputs=[value_output])
+
+
+    return model
+
+def get_meme_model():
+    inputs = layers.Input(shape=(WINDOW_SIZE,3), batch_size=BATCH_SIZE,
+                            dtype=tf.float32,name='input_layer')
+    # value_output = tf.slice(inputs, [0, WINDOW_SIZE-1,0], [BATCH_SIZE,WINDOW_SIZE-1,3])
+    x = layers.Lambda(lambda x: tf.slice(x, [0, WINDOW_SIZE-1,0], [BATCH_SIZE,1,3]))(inputs)
+    value_output = layers.Flatten()(x)
+    model = tf.keras.Model(inputs=inputs, outputs=[value_output])
 
 
     return model
@@ -202,48 +217,102 @@ def main():
     global fit_ic
     endTime =   datetime(2017,9,15,14)
     timeFrame = timedelta(0,0,0,0,0,1,0)
-    timeRange = timedelta(120)
+    timeRange = timedelta(400)
     # Get data
-    pdDiffData, barData = getPDData(endTime, timeRange, "H1", "AUDUSD")
+    pdData, barData = getPDData(endTime, timeRange, "H1", "AUDUSD")
 
-    print("got " + str(pdDiffData.shape) + " of data" + " for range " + str(timeRange.days*24))
+    print("got " + str(pdData.shape) + " of data" + " for range " + str(timeRange.days*24))
     
     # Split data into training and testing
-    raw_training_size = int(len(pdDiffData)*0.8)
-    raw_testing_size = len(pdDiffData) - raw_training_size
-    raw_training_data = pdDiffData.iloc[:raw_training_size]
-    raw_testing_data = pdDiffData.iloc[raw_training_size:]
+    raw_training_size = int(len(pdData)*0.8)
+    raw_testing_size = len(pdData) - raw_training_size
+    raw_training_data = pdData.iloc[:raw_training_size]
+    raw_testing_data = pdData.iloc[raw_training_size:]
     
-    print("training data:", raw_training_data.shape, len(raw_training_data), raw_training_size)
-    print("testing data:", raw_testing_data.shape, len(raw_testing_data))
+    print("raw training data:", raw_training_data.shape, len(raw_training_data), raw_training_size)
+    print("raw testing data:", raw_testing_data.shape, len(raw_testing_data))
 
-    window = 60 # 60 bars
+
     # Normalize data
     # training data: (samples-window, 3*window)   
     #  training labels: (samples-window, 3)
     training_data = []
-    training_labels = []
+    training_trend_labels = []
+    training_value_labels = []
+    i = 0
+    for s in range((len(raw_training_data)-WINDOW_SIZE)-(len(raw_training_data)-WINDOW_SIZE)%BATCH_SIZE):
+        sample = raw_training_data.iloc[s:s+WINDOW_SIZE].to_numpy()
+        label = raw_training_data.iloc[s+WINDOW_SIZE].to_numpy()
+        sample_mean = np.mean(sample)
+        sample_stddev = np.std(sample)
+        sample_normalized = (sample-sample_mean)/sample_stddev
+        label_normalized = (label-sample_mean)/sample_stddev
 
-    for s in range(len(raw_testing_data)-window):
-        training_data.append(raw_testing_data.iloc[s:s+window].to_numpy())
+        training_data.append(sample_normalized)
+        training_value_labels.append(label_normalized)
 
 
     training_data = np.array(training_data)
+    training_value_labels = np.array(training_value_labels)
+
+
+    testing_data = []
+    testing_trend_labels = []
+    testing_value_labels = []
+    for s in range((len(raw_testing_data)-WINDOW_SIZE)-(len(raw_testing_data)-WINDOW_SIZE)%BATCH_SIZE):
+        sample = raw_testing_data.iloc[s:s+WINDOW_SIZE].to_numpy()
+        label = raw_testing_data.iloc[s+WINDOW_SIZE].to_numpy()
+        sample_mean = np.mean(sample)
+        sample_stddev = np.std(sample)
+        sample_normalized = (sample-sample_mean)/sample_stddev
+        label_normalized = (label-sample_mean)/sample_stddev
+
+        testing_data.append(sample_normalized)
+        testing_value_labels.append(label_normalized)
+
+
+    testing_data = np.array(testing_data)
+    testing_value_labels = np.array(testing_value_labels)
+    
     print(training_data.shape)
-
-
+    print(training_value_labels.shape)
+    print(testing_data.shape)
+    print(testing_value_labels.shape)
 
     # Training
+    meme_model = get_meme_model()
+    meme_model.compile(
+        optimizer='adam',
+        loss=['mean_squared_error'],
+        loss_weights=[1.],
+        metrics=['accuracy','mean_absolute_error', 'mean_squared_error']
+    )
+
+    meme_model.summary()
+    meme_model.fit(training_data, training_value_labels, batch_size=BATCH_SIZE, epochs=5)
+
     model = get_soft_predictor_model()
     model.compile(
         optimizer='adam',
-        loss=['sparse_categorical_crossentropy', 'mean_squared_error'],
-        loss_weights=[1.,1.],
-        # metrics=['accuracy']
+        loss=['mean_squared_error'],
+        loss_weights=[1.],
+        metrics=['accuracy','mean_absolute_error', 'mean_squared_error']
     )
 
     model.summary()
+    early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
+    model.fit(training_data, training_value_labels, batch_size=BATCH_SIZE, epochs=15, 
+                callbacks=[early_stop])
 
+
+    # EVALUATE
+    print("\n\nEVALUATION:")
+    loss, acc, mae, mse = model.evaluate(testing_data,testing_value_labels)
+    print("{} {} {} {}".format(loss,acc,mae,mse))
+
+    loss, acc, mae, mse = meme_model.evaluate(testing_data,testing_value_labels)
+    print("{} {} {} {}".format(loss,acc,mae,mse))
+    
     exit(0)
 
     # set parameters
